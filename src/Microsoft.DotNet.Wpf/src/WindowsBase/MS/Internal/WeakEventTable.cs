@@ -132,7 +132,16 @@ namespace MS.Internal
             set
             {
                 EventKey key = new EventKey(manager, source, true);
-                _dataTable[key] = value;
+                if (!_inPurge)
+                {
+                    _dataTable[key] = value;
+                }
+                else
+                {
+                    // During purge, _dataTable is being enumerated.
+                    // Defer the update to avoid invalidating the enumerator.
+                    _toUpdate[key] = value;
+                }
             }
         }
 
@@ -338,6 +347,17 @@ namespace MS.Internal
                     LogAllocation(ide.GetType(), 1, 36);                    // Hashtable+HashtableEnumerator
 #endif
                     _inPurge = false;
+
+                    // apply deferred updates that were redirected during enumeration
+                    // (e.g. from WeakEventManager.Purge cloning a list with concurrent readers)
+                    if (_toUpdate.Count > 0)
+                    {
+                        foreach (DictionaryEntry de in _toUpdate)
+                        {
+                            _dataTable[de.Key] = de.Value;
+                        }
+                        _toUpdate.Clear();
+                    }
                 }
 
                 if (purgeAll)
@@ -446,6 +466,7 @@ namespace MS.Internal
         private CleanupHelper       _cleanupHelper;
         private bool                _inPurge;
         private List<EventKey>      _toRemove = new List<EventKey>();
+        private Hashtable           _toUpdate = new Hashtable();
 
 #if WeakEventTelemetry
         const int LOH_Threshold = 85000;    // per LOH docs
